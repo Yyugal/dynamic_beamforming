@@ -80,5 +80,82 @@ The system follows a streamlined computer-vision pipeline built using Python, Op
 These spatial estimates are fed into the beamforming codebook and power allocation module, which compares the detected phone directions against a predefined 8×8 (64-beam) codebook. Using Gaussian weighting, the system computes per-beam power contributions for one or multiple users and selects the dominant beam dynamically. Finally, all outputs are rendered through the visualization module, which overlays bounding boxes 
 and a beam arrow on the camera feed while simultaneously updating the polar plot that shows the user direction and beam distribution.
 
+1. Phone Detection (YOLOv8)
+
+The webcam frame is passed to YOLOv8, which identifies mobile phones using its pretrained COCO model. Only detections labeled as "cell phone" and having a confidence score above a threshold are kept. In the code, this is handled by:
+
+results = model(frame)
+for box in r.boxes:
+    if cls_name in PHONE_LABELS and score >= SCORE_THRESH:
+        detections.append(...)
+
+
+Detection runs every N frames (controlled by DETECT_EVERY_N) to improve FPS while still maintaining accuracy.
+
+2. Tracking Using IoU Matching
+
+YOLO detects objects per frame but does not know which detection belongs to which user. To solve this, the system uses IoU-based greedy matching to associate new detections with existing tracks. Each track has an ID, color, and counters for visible/invisible frames. If a track is not detected for several frames, it is removed.
+
+The key logic appears in functions:
+
+matches = greedy_match(tracks, detections, IOU_THRESH)
+
+
+and track updates such as:
+
+tr["invisible"] += 1
+if tr["invisible"] > MAX_INVISIBLE:
+    delete track
+
+
+This ensures consistent tracking even when phones move or briefly disappear.
+
+3. Angle Estimation (Azimuth & Elevation)
+
+For each tracked phone, the center of its bounding box is converted to a 3D ray using the pinhole camera model. The system approximates camera intrinsics (fx, fy, cx, cy) and computes:
+
+Azimuth (horizontal angle)
+
+Elevation (vertical angle)
+
+Using:
+
+az = arctan2(x, z)
+el = arctan2(-y, sqrt(x*x + z*z))
+
+
+To reduce jitter, an Exponential Moving Average (EMA) is applied:
+
+tr["az_s"] = EMA_ALPHA * old + (1 - EMA_ALPHA) * new
+
+
+This stabilizes the beam direction even when detections fluctuate slightly.
+
+4. Distance Estimation (Monocular Depth)
+
+Since there is no depth sensor, distance is estimated from the height of the phone’s bounding box. A larger bounding box means the phone is closer to the camera. The code uses:
+
+h_norm = (y2 - y1) / H
+dist_m = DIST_CALIB / h_norm
+
+
+The value is clamped between 0.5 m and 10 m to avoid unstable calculations.
+Phones beyond 5 meters are excluded from beamforming to maintain reliability.
+
+5. Beamforming Logic (64-Beam Codebook)
+
+The system uses an 8×8 beam codebook representing 64 possible azimuth–elevation beam directions. For each track, the angular difference between the phone’s azimuth/elevation and every beam in the codebook is computed. A Gaussian weighting is applied to calculate how strongly each beam aligns with each user:
+
+w = exp(-0.5 * ((d_az/σ_az)^2 + (d_el/σ_el)^2))
+
+
+When multiple phones are active, their weights are combined using their detection confidence scores. The beam with the highest total power becomes the dominant beam:
+
+dom_idx = argmax(beam_power)
+
+
+This index corresponds to the beam direction used for visualization.
+
 # Results
 The system successfully demonstrates real-time multi-user beamforming using only a laptop webcam and Python-based computer vision. YOLOv8 consistently detects mobile phones with stable bounding boxes, while the IoU-based tracking module maintains reliable IDs even when users move within the frame. Azimuth and elevation estimation remains smooth due to exponential filtering, and the monocular distance approximation performs effectively within the intended 5-meter range.
+
