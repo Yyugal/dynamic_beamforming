@@ -1,4 +1,4 @@
-# Dynamic Beam Foarming
+# Dynamic Beamforming
 Vision Aided Beamforming for Multi-Phone Detection & Distance-Based Beam Steering
 
 
