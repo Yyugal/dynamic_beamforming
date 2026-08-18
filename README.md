@@ -1,4 +1,4 @@
-# Project Title
+# Dynamic Beam Foarming
 Vision Aided Beamforming for Multi-Phone Detection & Distance-Based Beam Steering
 
 
